@@ -7,15 +7,15 @@ with open('materials.json', 'r') as f:
 concrete = input('请输入混凝土型号（如 C30）：')
 rebar = input('请输入钢筋型号（如 HRB400）：')
 # 输入材料型号
-b = input('请输入截面宽度 b（mm）：')
+b = float(input('请输入截面宽度 b（mm）：'))
 # 截面宽度
-h = input('请输入截面高度 h（mm）：')
+h = float(input('请输入截面高度 h（mm）：'))
 # 截面高度
-a_s = input('请输入受拉钢筋保护层厚度 a_s（mm）：')
+a_s = float(input('请输入受拉钢筋保护层厚度 a_s（mm）：'))
 # 受拉钢筋合力点至截面受拉边缘的距离
-M = input('请输入弯矩设计值 M（kN·m）：')
+M = float(input('请输入弯矩设计值 M（kN·m）：'))
 # 弯矩设计值
-f_cuk = materials['concrete'][concrete]['f_cuk']
+f_cuk = materials['concrete'][concrete]['fcuk']
 # 混凝土立方体抗压强度标准值
 fc = materials['concrete'][concrete]['fc']
 # 混凝土轴心抗压强度设计值
@@ -25,8 +25,8 @@ Es = materials['rebar'][rebar]['Es']
 # 钢筋弹性模量
 fy = materials['rebar'][rebar]['fy']
 # 钢筋抗拉强度设计值
-alpha_1 = materials['concrete'][concrete]['alpha_1']
-beta_1 = materials['concrete'][concrete]['beta_1']
+alpha_1 = materials['concrete'][concrete]['alpha1']
+beta_1 = materials['concrete'][concrete]['beta1']
 # 混凝土受压区等效矩形应力图形系数
 epsilon_cu = 0.0033 - (f_cuk - 50) * (1e-5)
 # 混凝土极限压应变
@@ -41,7 +41,7 @@ h0 = h - a_s
 
 def get_As():
 # 计算 所需受拉钢筋面积
-    alpha_s = M / (alpha_1 * fc * b * h0 * h0)
+    alpha_s = M * (1000000) / (alpha_1 * fc * b * h0 * h0)
     xi = 1 - math.sqrt(1 - 2 * alpha_s)
 
     if xi > xi_b:
@@ -63,15 +63,34 @@ else:
         n_bars = math.ceil(A_s / area)
         s = max(25, diameter)
         A_s_provided = n_bars * area
-        b_min = 2 * a_s + (n_bars - 1) * (diameter + s)
 
-        if A_s_provided >= A_s and b_min <= b:
-            valid_rebars.append((diameter, n_bars, A_s_provided))
+        # 先尝试单排布置
+        b_required_single = 2 * a_s + (n_bars - 1) * (diameter + s)
+        if A_s_provided >= A_s and b_required_single <= b:
+            valid_rebars.append((diameter, n_bars, A_s_provided, 1, n_bars))
+        else:
+            # 单排布置失败，检查是否可以双排
+            allow_double_row = (h - a_s) >= (2 * diameter + 10)
+            if allow_double_row:
+                per_row = math.ceil(n_bars / 2)
+                b_required_double = 2 * a_s + (per_row - 1) * (diameter + s)
+                if A_s_provided >= A_s and b_required_double <= b:
+                    valid_rebars.append((diameter, n_bars, A_s_provided, 2, per_row))
 
     if not valid_rebars:
         print('无法满足受拉钢筋面积要求，需增加截面宽度或调整钢筋型号')
     else:
         print('所需受拉钢筋面积 A_s = {:.2f} mm²'.format(A_s))
-        print('可选配筋方案（钢筋直径 mm，根数，提供面积 mm²）：')
-        for diameter, n_bars, A_s_provided in valid_rebars:
-            print('直径：{} mm，根数：{}，提供面积：{:.2f} mm²'.format(diameter, n_bars, A_s_provided))
+        print('可选配筋方案（钢筋直径 mm，根数，总提供面积 mm²，排数，每排根数）：')
+        for diameter, n_bars, A_s_provided, rows, per_row in valid_rebars:
+            other_row = n_bars - per_row
+            if rows == 1:
+                row_info = f'{per_row}'
+            else:
+                row_info = f'{per_row} / {other_row}'
+            print('直径：{} mm，根数：{}，提供面积：{:.2f} mm²，排数：{}，每排：{}'.format(
+                diameter, n_bars, A_s_provided, rows, row_info))
+        # 选择总面积最接近需求的方案作为经济方案
+        economic_rebar = min(valid_rebars, key=lambda x: x[2] - A_s)
+        print('推荐经济配筋方案：直径：{} mm，根数：{}，提供面积：{:.2f} mm²，排数：{}，每排：{}'.format(
+            economic_rebar[0], economic_rebar[1], economic_rebar[2], economic_rebar[3], economic_rebar[4]))
